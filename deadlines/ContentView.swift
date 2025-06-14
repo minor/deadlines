@@ -54,62 +54,79 @@ struct DeadlineRowView: View {
                         .background(Color.red)
                 }
                 .opacity(showingDeleteButton ? 1 : 0)
+                .allowsHitTesting(showingDeleteButton) // Only allow clicks when visible
             }
             
-            // Main content
-            HStack {
-                if editingDeadlineId == deadline.id {
-                    TextField("Deadline name", text: $editingText)
-                        .textFieldStyle(PlainTextFieldStyle())
-                        .font(.system(size: 14))
-                        .onSubmit {
-                            onUpdate(editingText)
-                            editingDeadlineId = nil
-                            editingText = ""
-                        }
-                        .onAppear {
-                            editingText = deadline.name
-                        }
-                } else {
-                    Text(deadline.name)
-                        .font(.system(size: 14))
-                        .onTapGesture(count: 2) {
-                            editingDeadlineId = deadline.id
-                            editingText = deadline.name
-                        }
-                }
-                
-                Spacer()
-                
-                Text(daysUntilText(for: deadline.daysUntil))
-                    .font(.system(size: 14))
-                    .foregroundColor(.red)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            .background(Color.clear)
-            .offset(x: offset)
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        // Only allow left swipe (negative translation)
-                        if value.translation.width < 0 {
-                            offset = max(value.translation.width, -60)
-                            showingDeleteButton = offset < -30
-                        }
-                    }
-                    .onEnded { value in
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            if offset < -30 {
-                                offset = -60
-                                showingDeleteButton = true
-                            } else {
-                                offset = 0
-                                showingDeleteButton = false
+            // Main content with scroll tracking
+            ZStack {
+                // Scroll tracking background (only active when delete button is not showing)
+                if !showingDeleteButton {
+                    ScrollTrackingView(
+                        onHorizontalScroll: { deltaX in
+                            // Only allow left swipe (negative delta)
+                            if deltaX < 0 {
+                                let newOffset = max(offset + deltaX * 2, -60)
+                                withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.8)) {
+                                    offset = newOffset
+                                    showingDeleteButton = newOffset < -30
+                                }
+                            } else if deltaX > 0 && offset < 0 {
+                                // Allow swiping back to close
+                                let newOffset = min(offset + deltaX * 2, 0)
+                                withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.8)) {
+                                    offset = newOffset
+                                    showingDeleteButton = newOffset < -30
+                                }
+                            }
+                        },
+                        onScrollEnded: {
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                if offset < -30 {
+                                    offset = -60
+                                    showingDeleteButton = true
+                                } else {
+                                    offset = 0
+                                    showingDeleteButton = false
+                                }
                             }
                         }
+                    )
+                }
+                
+                // Content
+                HStack {
+                    if editingDeadlineId == deadline.id {
+                        TextField("Deadline name", text: $editingText)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .font(.system(size: 14))
+                            .onSubmit {
+                                onUpdate(editingText)
+                                editingDeadlineId = nil
+                                editingText = ""
+                            }
+                            .onAppear {
+                                editingText = deadline.name
+                            }
+                    } else {
+                        Text(deadline.name)
+                            .font(.system(size: 14))
+                            .onTapGesture(count: 2) {
+                                editingDeadlineId = deadline.id
+                                editingText = deadline.name
+                            }
                     }
-            )
+                    
+                    Spacer()
+                    
+                    Text(daysUntilText(for: deadline.daysUntil))
+                        .font(.system(size: 14))
+                        .foregroundColor(.red)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+                .background(Color.clear)
+            }
+            .offset(x: offset)
             .onTapGesture {
                 // Tap to close delete button if it's showing
                 if showingDeleteButton {
@@ -146,127 +163,124 @@ struct MenuBarView: View {
                 Text("Deadlines")
                     .font(.system(size: 16, weight: .bold))
                     .padding(.horizontal, 16)
-                    .padding(.top, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
                 Spacer()
             }
             
-            // Deadlines list
-            VStack(spacing: 2) {
-                // Add deadline row (when adding)
-                if isAddingDeadline {
-                    HStack {
-                        TextField("Deadline Name...", text: $newDeadlineName)
-                            .textFieldStyle(PlainTextFieldStyle())
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                            .focused($isEditingDeadlineName)
-                            .onSubmit {
-                                if !newDeadlineName.isEmpty {
-                                    showDatePicker = true
-                                    isEditingMonth = true
-                                }
+            // Add deadline row (when adding)
+            if isAddingDeadline {
+                HStack {
+                    TextField("Deadline Name...", text: $newDeadlineName)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .focused($isEditingDeadlineName)
+                        .onSubmit {
+                            if !newDeadlineName.isEmpty {
+                                showDatePicker = true
+                                isEditingMonth = true
                             }
-                            .onKeyPress(.tab) {
-                                if !newDeadlineName.isEmpty {
-                                    showDatePicker = true
-                                    isEditingMonth = true
-                                }
-                                return .handled
+                        }
+                        .onKeyPress(.tab) {
+                            if !newDeadlineName.isEmpty {
+                                showDatePicker = true
+                                isEditingMonth = true
                             }
-                            .onAppear {
-                                // Auto-focus when the text field appears
-                                isEditingDeadlineName = true
-                            }
-                        
-                        Spacer()
-                        
-                        if showDatePicker {
-                            HStack(spacing: 2) {
-                                // Month input
-                                TextField("MM", text: $monthText)
-                                    .textFieldStyle(PlainTextFieldStyle())
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.red)
-                                    .frame(width: 24)
-                                    .multilineTextAlignment(.center)
-                                    .focused($isEditingMonth)
-                                    .onChange(of: monthText) {
-                                        // Limit to 2 digits and auto-advance
-                                        let newValue = String(monthText.prefix(2))
-                                        if newValue != monthText {
-                                            monthText = newValue
-                                        }
-                                        if monthText.count == 2, let month = Int(monthText), month >= 1 && month <= 12 {
-                                            DispatchQueue.main.async {
-                                                isEditingMonth = false
-                                                isEditingDay = true
-                                            }
-                                        }
+                            return .handled
+                        }
+                        .onAppear {
+                            // Auto-focus when the text field appears
+                            isEditingDeadlineName = true
+                        }
+                    
+                    Spacer()
+                    
+                    if showDatePicker {
+                        HStack(spacing: 2) {
+                            // Month input
+                            TextField("MM", text: $monthText)
+                                .textFieldStyle(PlainTextFieldStyle())
+                                .font(.system(size: 14))
+                                .foregroundColor(.red)
+                                .frame(width: 24)
+                                .multilineTextAlignment(.center)
+                                .focused($isEditingMonth)
+                                .onChange(of: monthText) {
+                                    // Limit to 2 digits and auto-advance
+                                    let newValue = String(monthText.prefix(2))
+                                    if newValue != monthText {
+                                        monthText = newValue
                                     }
-                                    .onSubmit {
-                                        if !dayText.isEmpty && !monthText.isEmpty {
-                                            createDeadlineFromInput()
-                                        } else if !monthText.isEmpty {
+                                    if monthText.count == 2, let month = Int(monthText), month >= 1 && month <= 12 {
+                                        DispatchQueue.main.async {
+                                            isEditingMonth = false
                                             isEditingDay = true
                                         }
                                     }
-                                
-                                Text("/")
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.red)
-                                
-                                // Day input
-                                TextField("DD", text: $dayText)
-                                    .textFieldStyle(PlainTextFieldStyle())
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.red)
-                                    .frame(width: 24)
-                                    .multilineTextAlignment(.center)
-                                    .focused($isEditingDay)
-                                    .onChange(of: dayText) {
-                                        // Limit to 2 digits only
-                                        dayText = String(dayText.prefix(2))
-                                    }
-                                    .onSubmit {
-                                        if !dayText.isEmpty && !monthText.isEmpty {
-                                            createDeadlineFromInput()
-                                        }
-                                    }
-                                    .onKeyPress(.tab) {
-                                        if !dayText.isEmpty && !monthText.isEmpty {
-                                            createDeadlineFromInput()
-                                        }
-                                        return .handled
-                                    }
-                            }
-                        } else {
-                            Text("MM/DD")
-                                .font(.system(size: 14))
-                                .foregroundColor(.red)
-                                .onTapGesture {
-                                    if !newDeadlineName.isEmpty {
-                                        showDatePicker = true
-                                        isEditingMonth = true
+                                }
+                                .onSubmit {
+                                    if !dayText.isEmpty && !monthText.isEmpty {
+                                        createDeadlineFromInput()
+                                    } else if !monthText.isEmpty {
+                                        isEditingDay = true
                                     }
                                 }
+                            
+                            Text("/")
+                                .font(.system(size: 14))
+                                .foregroundColor(.red)
+                            
+                            // Day input
+                            TextField("DD", text: $dayText)
+                                .textFieldStyle(PlainTextFieldStyle())
+                                .font(.system(size: 14))
+                                .foregroundColor(.red)
+                                .frame(width: 24)
+                                .multilineTextAlignment(.center)
+                                .focused($isEditingDay)
+                                .onChange(of: dayText) {
+                                    // Limit to 2 digits only
+                                    dayText = String(dayText.prefix(2))
+                                }
+                                .onSubmit {
+                                    if !dayText.isEmpty && !monthText.isEmpty {
+                                        createDeadlineFromInput()
+                                    }
+                                }
+                                .onKeyPress(.tab) {
+                                    if !dayText.isEmpty && !monthText.isEmpty {
+                                        createDeadlineFromInput()
+                                    }
+                                    return .handled
+                                }
                         }
+                    } else {
+                        Text("MM/DD")
+                            .font(.system(size: 14))
+                            .foregroundColor(.red)
+                            .onTapGesture {
+                                if !newDeadlineName.isEmpty {
+                                    showDatePicker = true
+                                    isEditingMonth = true
+                                }
+                            }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
                 }
-                
-                // Existing deadlines
-                ForEach(deadlineManager.sortedDeadlines) { deadline in
-                    DeadlineRowView(
-                        deadline: deadline,
-                        editingDeadlineId: $editingDeadlineId,
-                        editingText: $editingText,
-                        onDelete: { deadlineManager.removeDeadline(deadline) },
-                        onUpdate: { newName in deadlineManager.updateDeadlineName(id: deadline.id, newName: newName) }
-                    )
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
             }
-            .padding(.vertical, 8)
+            
+            // Existing deadlines
+            ForEach(deadlineManager.sortedDeadlines) { deadline in
+                DeadlineRowView(
+                    deadline: deadline,
+                    editingDeadlineId: $editingDeadlineId,
+                    editingText: $editingText,
+                    onDelete: { deadlineManager.removeDeadline(deadline) },
+                    onUpdate: { newName in deadlineManager.updateDeadlineName(id: deadline.id, newName: newName) }
+                )
+            }
             
             // Separator
             Divider()
@@ -287,7 +301,7 @@ struct MenuBarView: View {
                     Spacer()
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .padding(.vertical, 6)
             }
             .buttonStyle(PlainButtonStyle())
             
@@ -311,12 +325,13 @@ struct MenuBarView: View {
                         .foregroundColor(.secondary)
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .padding(.vertical, 6)
             }
             .buttonStyle(PlainButtonStyle())
             .keyboardShortcut("q", modifiers: .command)
         }
-        .frame(minWidth: 280, maxWidth: 280)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: 280)
         .background(VisualEffectView())
     }
     
@@ -415,6 +430,92 @@ class DeadlineManager: ObservableObject {
 struct ContentView: View {
     var body: some View {
         MenuBarView()
+    }
+}
+
+// Scroll tracking view for trackpad gestures
+struct ScrollTrackingView: NSViewRepresentable {
+    let onHorizontalScroll: (CGFloat) -> Void
+    let onScrollEnded: () -> Void
+    
+    func makeNSView(context: Context) -> ScrollTrackingNSView {
+        let view = ScrollTrackingNSView()
+        view.onHorizontalScroll = onHorizontalScroll
+        view.onScrollEnded = onScrollEnded
+        return view
+    }
+    
+    func updateNSView(_ nsView: ScrollTrackingNSView, context: Context) {
+        nsView.onHorizontalScroll = onHorizontalScroll
+        nsView.onScrollEnded = onScrollEnded
+    }
+}
+
+class ScrollTrackingNSView: NSView {
+    var onHorizontalScroll: ((CGFloat) -> Void)?
+    var onScrollEnded: (() -> Void)?
+    private var scrollEndTimer: Timer?
+    
+    override func awakeFromNib() {
+        super.awakeFromNib()
+        setupScrollTracking()
+    }
+    
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupScrollTracking()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupScrollTracking()
+    }
+    
+    private func setupScrollTracking() {
+        // Accept first responder to receive scroll events
+        wantsLayer = true
+    }
+    
+    override var acceptsFirstResponder: Bool {
+        return true
+    }
+    
+    override func scrollWheel(with event: NSEvent) {
+        // Only handle horizontal scrolling
+        if abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
+            onHorizontalScroll?(event.scrollingDeltaX)
+            
+            // Reset the timer for scroll end detection
+            scrollEndTimer?.invalidate()
+            scrollEndTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { _ in
+                self.onScrollEnded?()
+            }
+        } else {
+            // Pass vertical scrolling to the parent
+            super.scrollWheel(with: event)
+        }
+    }
+    
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        // Become first responder when mouse enters
+        window?.makeFirstResponder(self)
+    }
+    
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        
+        // Remove existing tracking areas
+        trackingAreas.forEach { removeTrackingArea($0) }
+        
+        // Add new tracking area
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
     }
 }
 
