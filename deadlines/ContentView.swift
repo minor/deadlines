@@ -18,7 +18,16 @@ struct Deadline: Identifiable, Codable {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         let deadlineDate = calendar.startOfDay(for: date)
-        return calendar.dateComponents([.day], from: today, to: deadlineDate).day ?? 0
+        let days = calendar.dateComponents([.day], from: today, to: deadlineDate).day ?? 0
+        
+        // If the date is in the past, assume they mean next year
+        if days < 0 {
+            // Calculate days until the same date next year
+            let nextYear = calendar.date(byAdding: .year, value: 1, to: deadlineDate) ?? deadlineDate
+            return calendar.dateComponents([.day], from: today, to: nextYear).day ?? 0
+        }
+        
+        return days
     }
 }
 
