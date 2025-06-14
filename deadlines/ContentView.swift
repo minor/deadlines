@@ -22,6 +22,99 @@ struct Deadline: Identifiable, Codable {
     }
 }
 
+// Individual deadline row with swipe-to-delete
+struct DeadlineRowView: View {
+    let deadline: Deadline
+    @Binding var editingDeadlineId: UUID?
+    @Binding var editingText: String
+    let onDelete: () -> Void
+    let onUpdate: (String) -> Void
+    
+    @State private var offset: CGFloat = 0
+    @State private var showingDeleteButton = false
+    
+    var body: some View {
+        ZStack {
+            // Delete button background
+            HStack {
+                Spacer()
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .foregroundColor(.white)
+                        .frame(width: 60, height: 32)
+                        .background(Color.red)
+                }
+                .opacity(showingDeleteButton ? 1 : 0)
+            }
+            
+            // Main content
+            HStack {
+                if editingDeadlineId == deadline.id {
+                    TextField("Deadline name", text: $editingText)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .font(.system(size: 14))
+                        .onSubmit {
+                            onUpdate(editingText)
+                            editingDeadlineId = nil
+                            editingText = ""
+                        }
+                        .onAppear {
+                            editingText = deadline.name
+                        }
+                } else {
+                    Text(deadline.name)
+                        .font(.system(size: 14))
+                        .onTapGesture(count: 2) {
+                            editingDeadlineId = deadline.id
+                            editingText = deadline.name
+                        }
+                }
+                
+                Spacer()
+                
+                Text(daysUntilText(for: deadline.daysUntil))
+                    .font(.system(size: 14))
+                    .foregroundColor(.red)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(Color.clear)
+            .offset(x: offset)
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        // Only allow left swipe (negative translation)
+                        if value.translation.width < 0 {
+                            offset = max(value.translation.width, -60)
+                            showingDeleteButton = offset < -30
+                        }
+                    }
+                    .onEnded { value in
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            if offset < -30 {
+                                offset = -60
+                                showingDeleteButton = true
+                            } else {
+                                offset = 0
+                                showingDeleteButton = false
+                            }
+                        }
+                    }
+            )
+            .onTapGesture {
+                // Tap to close delete button if it's showing
+                if showingDeleteButton {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        offset = 0
+                        showingDeleteButton = false
+                    }
+                }
+            }
+        }
+        .clipped()
+    }
+}
+
 // Menu bar content view
 struct MenuBarView: View {
     @StateObject private var deadlineManager = DeadlineManager()
@@ -31,6 +124,11 @@ struct MenuBarView: View {
     @State private var showDatePicker = false
     @State private var editingDeadlineId: UUID? = nil
     @State private var editingText = ""
+    @State private var monthText = ""
+    @State private var dayText = ""
+    @FocusState private var isEditingMonth: Bool
+    @FocusState private var isEditingDay: Bool
+    @FocusState private var isEditingDeadlineName: Bool
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -39,12 +137,12 @@ struct MenuBarView: View {
                 Text("Deadlines")
                     .font(.system(size: 16, weight: .bold))
                     .padding(.horizontal, 16)
-                    .padding(.top, 8)
+                    .padding(.top, 16)
                 Spacer()
             }
             
             // Deadlines list
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(spacing: 2) {
                 // Add deadline row (when adding)
                 if isAddingDeadline {
                     HStack {
@@ -52,73 +150,111 @@ struct MenuBarView: View {
                             .textFieldStyle(PlainTextFieldStyle())
                             .font(.system(size: 14))
                             .foregroundColor(.secondary)
+                            .focused($isEditingDeadlineName)
                             .onSubmit {
                                 if !newDeadlineName.isEmpty {
                                     showDatePicker = true
+                                    isEditingMonth = true
                                 }
+                            }
+                            .onKeyPress(.tab) {
+                                if !newDeadlineName.isEmpty {
+                                    showDatePicker = true
+                                    isEditingMonth = true
+                                }
+                                return .handled
+                            }
+                            .onAppear {
+                                // Auto-focus when the text field appears
+                                isEditingDeadlineName = true
                             }
                         
                         Spacer()
                         
                         if showDatePicker {
-                            DatePicker("", selection: $newDeadlineDate, displayedComponents: .date)
-                                .labelsHidden()
-                                .datePickerStyle(CompactDatePickerStyle())
-                                .font(.system(size: 14))
-                                .onChange(of: newDeadlineDate) {
-                                    // Auto-save when date is selected
-                                    if !newDeadlineName.isEmpty {
-                                        deadlineManager.addDeadline(name: newDeadlineName, date: newDeadlineDate)
-                                        resetAddDeadlineState()
+                            HStack(spacing: 2) {
+                                // Month input
+                                TextField("MM", text: $monthText)
+                                    .textFieldStyle(PlainTextFieldStyle())
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.red)
+                                    .frame(width: 24)
+                                    .multilineTextAlignment(.center)
+                                    .focused($isEditingMonth)
+                                    .onChange(of: monthText) {
+                                        // Limit to 2 digits and auto-advance
+                                        let newValue = String(monthText.prefix(2))
+                                        if newValue != monthText {
+                                            monthText = newValue
+                                        }
+                                        if monthText.count == 2, let month = Int(monthText), month >= 1 && month <= 12 {
+                                            DispatchQueue.main.async {
+                                                isEditingMonth = false
+                                                isEditingDay = true
+                                            }
+                                        }
                                     }
-                                }
+                                    .onSubmit {
+                                        if !dayText.isEmpty && !monthText.isEmpty {
+                                            createDeadlineFromInput()
+                                        } else if !monthText.isEmpty {
+                                            isEditingDay = true
+                                        }
+                                    }
+                                
+                                Text("/")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.red)
+                                
+                                // Day input
+                                TextField("DD", text: $dayText)
+                                    .textFieldStyle(PlainTextFieldStyle())
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.red)
+                                    .frame(width: 24)
+                                    .multilineTextAlignment(.center)
+                                    .focused($isEditingDay)
+                                    .onChange(of: dayText) {
+                                        // Limit to 2 digits only
+                                        dayText = String(dayText.prefix(2))
+                                    }
+                                    .onSubmit {
+                                        if !dayText.isEmpty && !monthText.isEmpty {
+                                            createDeadlineFromInput()
+                                        }
+                                    }
+                                    .onKeyPress(.tab) {
+                                        if !dayText.isEmpty && !monthText.isEmpty {
+                                            createDeadlineFromInput()
+                                        }
+                                        return .handled
+                                    }
+                            }
                         } else {
-                            Text("DD/MM")
+                            Text("MM/DD")
                                 .font(.system(size: 14))
                                 .foregroundColor(.red)
                                 .onTapGesture {
                                     if !newDeadlineName.isEmpty {
                                         showDatePicker = true
+                                        isEditingMonth = true
                                     }
                                 }
                         }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 6)
                 }
                 
                 // Existing deadlines
                 ForEach(deadlineManager.sortedDeadlines) { deadline in
-                    HStack {
-                        if editingDeadlineId == deadline.id {
-                            TextField("Deadline name", text: $editingText)
-                                .textFieldStyle(PlainTextFieldStyle())
-                                .font(.system(size: 14))
-                                .onSubmit {
-                                    deadlineManager.updateDeadlineName(id: deadline.id, newName: editingText)
-                                    editingDeadlineId = nil
-                                    editingText = ""
-                                }
-                                .onAppear {
-                                    editingText = deadline.name
-                                }
-                        } else {
-                            Text(deadline.name)
-                                .font(.system(size: 14))
-                                .onTapGesture(count: 2) {
-                                    editingDeadlineId = deadline.id
-                                    editingText = deadline.name
-                                }
-                        }
-                        
-                        Spacer()
-                        
-                        Text("\(deadline.daysUntil) days")
-                            .font(.system(size: 14))
-                            .foregroundColor(.red)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 4)
+                    DeadlineRowView(
+                        deadline: deadline,
+                        editingDeadlineId: $editingDeadlineId,
+                        editingText: $editingText,
+                        onDelete: { deadlineManager.removeDeadline(deadline) },
+                        onUpdate: { newName in deadlineManager.updateDeadlineName(id: deadline.id, newName: newName) }
+                    )
                 }
             }
             .padding(.vertical, 8)
@@ -142,7 +278,7 @@ struct MenuBarView: View {
                     Spacer()
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.vertical, 10)
             }
             .buttonStyle(PlainButtonStyle())
             
@@ -166,12 +302,12 @@ struct MenuBarView: View {
                         .foregroundColor(.secondary)
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.vertical, 10)
             }
             .buttonStyle(PlainButtonStyle())
             .keyboardShortcut("q", modifiers: .command)
         }
-        .frame(width: 280)
+        .frame(minWidth: 280, maxWidth: 280)
         .background(VisualEffectView())
     }
     
@@ -180,6 +316,30 @@ struct MenuBarView: View {
         showDatePicker = false
         newDeadlineName = ""
         newDeadlineDate = Date()
+        monthText = ""
+        dayText = ""
+        isEditingMonth = false
+        isEditingDay = false
+        isEditingDeadlineName = false
+    }
+    
+    private func createDeadlineFromInput() {
+        guard let day = Int(dayText), let month = Int(monthText),
+              day >= 1 && day <= 31, month >= 1 && month <= 12,
+              !newDeadlineName.isEmpty else { return }
+        
+        let calendar = Calendar.current
+        let currentYear = calendar.component(.year, from: Date())
+        
+        var dateComponents = DateComponents()
+        dateComponents.year = currentYear
+        dateComponents.month = month
+        dateComponents.day = day
+        
+        if let date = calendar.date(from: dateComponents) {
+            deadlineManager.addDeadline(name: newDeadlineName, date: date)
+            resetAddDeadlineState()
+        }
     }
 }
 
@@ -195,7 +355,12 @@ class DeadlineManager: ObservableObject {
     }
     
     var sortedDeadlines: [Deadline] {
-        deadlines.sorted { $0.daysUntil < $1.daysUntil }
+        deadlines.sorted { first, second in
+            if first.daysUntil == second.daysUntil {
+                return first.name.localizedCaseInsensitiveCompare(second.name) == .orderedAscending
+            }
+            return first.daysUntil < second.daysUntil
+        }
     }
     
     func addDeadline(name: String, date: Date) {
@@ -255,6 +420,18 @@ struct VisualEffectView: NSViewRepresentable {
     }
     
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+// Helper function to format days until text
+func daysUntilText(for days: Int) -> String {
+    switch days {
+    case 0:
+        return "Today!"
+    case 1:
+        return "1 day"
+    default:
+        return "\(days) days"
+    }
 }
 
 #Preview {
