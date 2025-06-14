@@ -50,7 +50,8 @@ struct DeadlineRowView: View {
                 Button(action: onDelete) {
                     Image(systemName: "trash")
                         .foregroundColor(.white)
-                        .frame(width: 60, height: 32)
+                        .frame(width: 60)
+                        .frame(maxHeight: .infinity)
                         .background(Color.red)
                 }
                 .opacity(showingDeleteButton ? 1 : 0)
@@ -123,7 +124,7 @@ struct DeadlineRowView: View {
                         .foregroundColor(.red)
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
                 .background(Color.clear)
             }
             .offset(x: offset)
@@ -163,8 +164,8 @@ struct MenuBarView: View {
                 Text("Deadlines")
                     .font(.system(size: 16, weight: .bold))
                     .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
                 Spacer()
             }
             
@@ -191,7 +192,9 @@ struct MenuBarView: View {
                         }
                         .onAppear {
                             // Auto-focus when the text field appears
-                            isEditingDeadlineName = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                isEditingDeadlineName = true
+                            }
                         }
                     
                     Spacer()
@@ -256,7 +259,7 @@ struct MenuBarView: View {
                                 }
                         }
                     } else {
-                        Text("MM/DD")
+                        Text("MM / DD")
                             .font(.system(size: 14))
                             .foregroundColor(.red)
                             .onTapGesture {
@@ -268,7 +271,7 @@ struct MenuBarView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
             }
             
             // Existing deadlines
@@ -285,6 +288,7 @@ struct MenuBarView: View {
             // Separator
             Divider()
                 .padding(.horizontal, 16)
+                .padding(.top, 8)
             
             // Add deadline button
             Button(action: {
@@ -301,7 +305,7 @@ struct MenuBarView: View {
                     Spacer()
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 6)
+                .padding(.vertical, 10)
             }
             .buttonStyle(PlainButtonStyle())
             
@@ -325,7 +329,7 @@ struct MenuBarView: View {
                         .foregroundColor(.secondary)
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 6)
+                .padding(.vertical, 10)
             }
             .buttonStyle(PlainButtonStyle())
             .keyboardShortcut("q", modifiers: .command)
