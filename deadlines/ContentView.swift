@@ -48,52 +48,22 @@ struct DeadlineRowView: View {
             HStack {
                 Spacer()
                 Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .foregroundColor(.white)
-                        .frame(width: 60)
-                        .frame(maxHeight: .infinity)
-                        .background(Color.red)
+                    ZStack {
+                        Rectangle()
+                            .fill(Color.red)
+                            .frame(width: 60)
+                            .frame(maxHeight: .infinity)
+                        
+                        Image(systemName: "trash")
+                            .foregroundColor(.white)
+                    }
                 }
-                .opacity(showingDeleteButton ? 1 : 0)
-                .allowsHitTesting(showingDeleteButton) // Only allow clicks when visible
+                .buttonStyle(PlainButtonStyle())
+                .opacity(min(1, abs(offset / 60.0)))
             }
             
             // Main content with scroll tracking
             ZStack {
-                // Scroll tracking background (only active when delete button is not showing)
-                if !showingDeleteButton {
-                    ScrollTrackingView(
-                        onHorizontalScroll: { deltaX in
-                            // Only allow left swipe (negative delta)
-                            if deltaX < 0 {
-                                let newOffset = max(offset + deltaX * 2, -60)
-                                withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.8)) {
-                                    offset = newOffset
-                                    showingDeleteButton = newOffset < -30
-                                }
-                            } else if deltaX > 0 && offset < 0 {
-                                // Allow swiping back to close
-                                let newOffset = min(offset + deltaX * 2, 0)
-                                withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.8)) {
-                                    offset = newOffset
-                                    showingDeleteButton = newOffset < -30
-                                }
-                            }
-                        },
-                        onScrollEnded: {
-                            withAnimation(.easeOut(duration: 0.3)) {
-                                if offset < -30 {
-                                    offset = -60
-                                    showingDeleteButton = true
-                                } else {
-                                    offset = 0
-                                    showingDeleteButton = false
-                                }
-                            }
-                        }
-                    )
-                }
-                
                 // Content
                 HStack {
                     if editingDeadlineId == deadline.id {
@@ -126,6 +96,31 @@ struct DeadlineRowView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
                 .background(Color.clear)
+                
+                // Scroll tracking view on top
+                ScrollTrackingView(
+                    onHorizontalScroll: { deltaX in
+                        // Invert scroll direction so a right-to-left swipe reveals the action.
+                        let newOffset = offset - deltaX
+                        let clampedOffset = min(0, max(-60, newOffset))
+                        
+                        // Only update if there's a change to avoid unnecessary re-renders
+                        if clampedOffset != offset {
+                            offset = clampedOffset
+                        }
+                    },
+                    onScrollEnded: {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            if offset < -30 {
+                                offset = -60
+                                showingDeleteButton = true
+                            } else {
+                                offset = 0
+                                showingDeleteButton = false
+                            }
+                        }
+                    }
+                )
             }
             .offset(x: offset)
             .onTapGesture {
@@ -180,13 +175,17 @@ struct MenuBarView: View {
                         .onSubmit {
                             if !newDeadlineName.isEmpty {
                                 showDatePicker = true
-                                isEditingMonth = true
+                                DispatchQueue.main.async {
+                                    isEditingMonth = true
+                                }
                             }
                         }
                         .onKeyPress(.tab) {
                             if !newDeadlineName.isEmpty {
                                 showDatePicker = true
-                                isEditingMonth = true
+                                DispatchQueue.main.async {
+                                    isEditingMonth = true
+                                }
                             }
                             return .handled
                         }
@@ -200,64 +199,71 @@ struct MenuBarView: View {
                     Spacer()
                     
                     if showDatePicker {
-                        HStack(spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
                             // Month input
-                            TextField("MM", text: $monthText)
-                                .textFieldStyle(PlainTextFieldStyle())
-                                .font(.system(size: 14))
-                                .foregroundColor(.red)
-                                .frame(width: 24)
-                                .multilineTextAlignment(.center)
-                                .focused($isEditingMonth)
-                                .onChange(of: monthText) {
-                                    // Limit to 2 digits and auto-advance
-                                    let newValue = String(monthText.prefix(2))
-                                    if newValue != monthText {
-                                        monthText = newValue
+                            ZStack {
+                                TextField("MM", text: $monthText)
+                                    .textFieldStyle(PlainTextFieldStyle())
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.red)
+                                    .multilineTextAlignment(.center)
+                                    .focused($isEditingMonth)
+                                    .onChange(of: monthText) {
+                                        // Limit to 2 digits and auto-advance
+                                        let newValue = String(monthText.prefix(2))
+                                        if newValue != monthText {
+                                            monthText = newValue
+                                        }
+                                        if monthText.count == 2, let month = Int(monthText), month >= 1 && month <= 12 {
+                                            DispatchQueue.main.async {
+                                                isEditingMonth = false
+                                                isEditingDay = true
+                                            }
+                                        }
                                     }
-                                    if monthText.count == 2, let month = Int(monthText), month >= 1 && month <= 12 {
-                                        DispatchQueue.main.async {
-                                            isEditingMonth = false
+                                    .onSubmit {
+                                        if !dayText.isEmpty && !monthText.isEmpty {
+                                            createDeadlineFromInput()
+                                        } else if !monthText.isEmpty {
                                             isEditingDay = true
                                         }
                                     }
-                                }
-                                .onSubmit {
-                                    if !dayText.isEmpty && !monthText.isEmpty {
-                                        createDeadlineFromInput()
-                                    } else if !monthText.isEmpty {
-                                        isEditingDay = true
-                                    }
-                                }
+                            }
+                            .background(Color.clear)
+                            .frame(width: 24)
                             
                             Text("/")
                                 .font(.system(size: 14))
                                 .foregroundColor(.red)
                             
                             // Day input
-                            TextField("DD", text: $dayText)
-                                .textFieldStyle(PlainTextFieldStyle())
-                                .font(.system(size: 14))
-                                .foregroundColor(.red)
-                                .frame(width: 24)
-                                .multilineTextAlignment(.center)
-                                .focused($isEditingDay)
-                                .onChange(of: dayText) {
-                                    // Limit to 2 digits only
-                                    dayText = String(dayText.prefix(2))
-                                }
-                                .onSubmit {
-                                    if !dayText.isEmpty && !monthText.isEmpty {
-                                        createDeadlineFromInput()
+                            ZStack {
+                                TextField("DD", text: $dayText)
+                                    .textFieldStyle(PlainTextFieldStyle())
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.red)
+                                    .multilineTextAlignment(.center)
+                                    .focused($isEditingDay)
+                                    .onChange(of: dayText) {
+                                        // Limit to 2 digits only
+                                        dayText = String(dayText.prefix(2))
                                     }
-                                }
-                                .onKeyPress(.tab) {
-                                    if !dayText.isEmpty && !monthText.isEmpty {
-                                        createDeadlineFromInput()
+                                    .onSubmit {
+                                        if !dayText.isEmpty && !monthText.isEmpty {
+                                            createDeadlineFromInput()
+                                        }
                                     }
-                                    return .handled
-                                }
+                                    .onKeyPress(.tab) {
+                                        if !dayText.isEmpty && !monthText.isEmpty {
+                                            createDeadlineFromInput()
+                                        }
+                                        return .handled
+                                    }
+                            }
+                            .background(Color.clear)
+                            .frame(width: 24)
                         }
+                        .frame(width: 60, alignment: .trailing)
                     } else {
                         Text("MM / DD")
                             .font(.system(size: 14))
@@ -268,6 +274,7 @@ struct MenuBarView: View {
                                     isEditingMonth = true
                                 }
                             }
+                            .frame(width: 60, alignment: .trailing)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -458,7 +465,7 @@ struct ScrollTrackingView: NSViewRepresentable {
 class ScrollTrackingNSView: NSView {
     var onHorizontalScroll: ((CGFloat) -> Void)?
     var onScrollEnded: (() -> Void)?
-    private var scrollEndTimer: Timer?
+    private var isHorizontallyScrolling = false
     
     override func awakeFromNib() {
         super.awakeFromNib()
@@ -485,17 +492,18 @@ class ScrollTrackingNSView: NSView {
     }
     
     override func scrollWheel(with event: NSEvent) {
-        // Only handle horizontal scrolling
-        if abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
+        if event.phase == .began {
+            isHorizontallyScrolling = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+        }
+        
+        if isHorizontallyScrolling {
             onHorizontalScroll?(event.scrollingDeltaX)
             
-            // Reset the timer for scroll end detection
-            scrollEndTimer?.invalidate()
-            scrollEndTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: false) { _ in
-                self.onScrollEnded?()
+            if event.phase == .ended || event.phase == .cancelled || (event.momentumPhase == .ended) {
+                onScrollEnded?()
+                isHorizontallyScrolling = false
             }
         } else {
-            // Pass vertical scrolling to the parent
             super.scrollWheel(with: event)
         }
     }
