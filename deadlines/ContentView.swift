@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import Combine
 
 // Data model for a deadline
 struct Deadline: Identifiable, Codable {
@@ -18,16 +19,8 @@ struct Deadline: Identifiable, Codable {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         let deadlineDate = calendar.startOfDay(for: date)
-        let days = calendar.dateComponents([.day], from: today, to: deadlineDate).day ?? 0
-        
-        // If the date is in the past, assume they mean next year
-        if days < 0 {
-            // Calculate days until the same date next year
-            let nextYear = calendar.date(byAdding: .year, value: 1, to: deadlineDate) ?? deadlineDate
-            return calendar.dateComponents([.day], from: today, to: nextYear).day ?? 0
-        }
-        
-        return days
+        // Positive for future dates, 0 for today, negative for past dates.
+        return calendar.dateComponents([.day], from: today, to: deadlineDate).day ?? 0
     }
 }
 
@@ -344,6 +337,18 @@ struct MenuBarView: View {
         .fixedSize(horizontal: false, vertical: true)
         .frame(width: 280)
         .background(VisualEffectView())
+        // When the popover closes, discard any unfinished add-deadline draft so it doesn't persist.
+        .onDisappear {
+            if isAddingDeadline {
+                resetAddDeadlineState()
+            }
+        }
+        // NSPopover.willCloseNotification is sent whenever this menu-bar popover is dismissed.
+        .onReceive(NotificationCenter.default.publisher(for: NSPopover.willCloseNotification)) { _ in
+            if isAddingDeadline {
+                resetAddDeadlineState()
+            }
+        }
     }
     
     private func resetAddDeadlineState() {
@@ -385,8 +390,14 @@ class DeadlineManager: ObservableObject {
     private let userDefaults = UserDefaults.standard
     private let deadlinesKey = "SavedDeadlines"
     
+    // Timer that fires at local midnight to refresh `daysUntil` calculations
+    private var midnightTimer: Timer?
+    
     init() {
         loadDeadlines()
+        
+        // Schedule the first midnight refresh
+        scheduleMidnightTimer()
     }
     
     var sortedDeadlines: [Deadline] {
@@ -422,6 +433,16 @@ class DeadlineManager: ObservableObject {
         }
     }
     
+    // Remove deadlines that have been overdue for longer than `overdueDeletionThreshold` days.
+    private func cleanupOverdueDeadlines() {
+        let overdueDeletionThreshold = -7 // days (negative)
+        let originalCount = deadlines.count
+        deadlines.removeAll { $0.daysUntil < overdueDeletionThreshold }
+        if deadlines.count != originalCount {
+            saveDeadlines()
+        }
+    }
+    
     private func loadDeadlines() {
         if let data = userDefaults.data(forKey: deadlinesKey),
            let decoded = try? JSONDecoder().decode([Deadline].self, from: data) {
@@ -434,6 +455,47 @@ class DeadlineManager: ObservableObject {
                 Deadline(name: "Conference", date: Calendar.current.date(byAdding: .day, value: 24, to: Date()) ?? Date())
             ]
         }
+        
+        // Initial cleanup in case stored data contains very old deadlines.
+        cleanupOverdueDeadlines()
+    }
+    
+    // MARK: - Midnight refresh
+    
+    /// Schedules a one-shot timer that fires at the next local midnight.
+    private func scheduleMidnightTimer() {
+        midnightTimer?.invalidate()
+        
+        let calendar = Calendar.current
+        let now = Date()
+        
+        // Find the next occurrence of 00:00:00 in the current calendar/time zone
+        if let nextMidnight = calendar.nextDate(after: now,
+                                                matching: DateComponents(hour: 0, minute: 0, second: 0),
+                                                matchingPolicy: .strict,
+                                                direction: .forward) {
+            midnightTimer = Timer(fireAt: nextMidnight,
+                                   interval: 0,
+                                   target: self,
+                                   selector: #selector(handleMidnight),
+                                   userInfo: nil,
+                                   repeats: false)
+            if let midnightTimer {
+                RunLoop.main.add(midnightTimer, forMode: .common)
+            }
+        }
+    }
+    
+    /// Called when the day changes; notifies observers and reschedules the timer.
+    @objc private func handleMidnight() {
+        // Remove any deadlines that are past the overdue threshold before notifying views.
+        cleanupOverdueDeadlines()
+        
+        // Trigger view updates so `daysUntil` is recalculated during the next render.
+        objectWillChange.send()
+        
+        // Prepare for the following day.
+        scheduleMidnightTimer()
     }
 }
 
@@ -546,6 +608,9 @@ struct VisualEffectView: NSViewRepresentable {
 
 // Helper function to format days until text
 func daysUntilText(for days: Int) -> String {
+    if days < 0 {
+        return "Overdue!"
+    }
     switch days {
     case 0:
         return "Today!"
