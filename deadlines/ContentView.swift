@@ -398,6 +398,23 @@ class DeadlineManager: ObservableObject {
         
         // Schedule the first midnight refresh
         scheduleMidnightTimer()
+
+        // Also listen for the system-wide day-change notification. This is
+        // posted by the system immediately after the calendar day rolls over
+        // (even if the app was asleep), and is more reliable than a timer
+        // alone.
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(handleMidnight),
+                                               name: .NSCalendarDayChanged,
+                                               object: nil)
+
+        // Refresh when the app becomes active (covers cases where the Mac was
+        // asleep through midnight or the user launches the app after a day or
+        // more).
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(handleMidnight),
+                                               name: NSApplication.didBecomeActiveNotification,
+                                               object: nil)
     }
     
     var sortedDeadlines: [Deadline] {
